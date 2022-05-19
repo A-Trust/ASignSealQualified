@@ -37,7 +37,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Standalone DSS A-Trust qualified signature test for the MCWE for A-Trust
+ * Standalone DSS A-Trust qualified signature test for the MCWE for A-Trust, based on the DemoJava example.
  */
 public class PdfSignDemo {
     public static void main(String[] args) throws Exception {
@@ -79,29 +79,39 @@ public class PdfSignDemo {
         System.out.println("=================");
         System.out.println("sign with seal private key");
 
-        // START PART 1 - Until here this demo application is the same as DemoJava
+        // START PART 1 - Until here this demo application is the same as DemoJava. We now have the signing certificate.
 
+        // TODO: A RSA based public key would be needed for PDF signatures (critical)
+
+        // load the certificate into a compatible structure
         X509Certificate seal_certificate_x509 = (X509Certificate) CertificateFactory.getInstance("X.509")
                 .generateCertificates(new ByteArrayInputStream(seal_certificate_raw)).stream().findFirst().get();
 
-        // Downloaded sample from https://svn.apache.org/repos/asf/tika/trunk/tika-parsers/src/test/resources/test-documents/testPDF_Version.8.x.pdf
+        // load a sample PDF document from file
+        // downloaded sample from https://svn.apache.org/repos/asf/tika/trunk/tika-parsers/src/test/resources/test-documents/testPDF_Version.8.x.pdf
         DSSDocument doc = new FileDocument("testPDF_Version.8.x.pdf");
 
+        // prepare parameters used to generate signature structure and visual signature
+        // this step requires the certificate to be present
         PAdESSignatureParameters parameters = prepareSignParameters(seal_certificate_x509);
 
-        // We need this because we are testing with an expired certificate
+        // we need this because we are testing with an expired certificate
         parameters.setSignWithExpiredCertificate(true);
 
-        // Create common certificate verifier
+        // create common certificate verifier
         CommonCertificateVerifier commonCertificateVerifier = new CommonCertificateVerifier();
-        // Create PAdESService for signature
+
+        // create PAdESService to create a PDF Advanced Electronic Signature
         PAdESService service = new PAdESService(commonCertificateVerifier);
+
+        // use default signing services
         service.setPdfObjFactory(new PdfBoxNativeObjectFactory());
-        // Get the SignedInfo segment that need to be signed.
+
+        // extract the data to sign from the given sample document
         ToBeSigned dataToSignDSS = service.getDataToSign(doc, parameters);
         byte[] dataToSign = dataToSignDSS.getBytes();
 
-        // END PART 2 - We now have data from the prepared PDF with certificate information and PDF structure for signature
+        // END PART 1 - We now have data from the prepared PDF with certificate information and PDF structure for signature
         //              and sign it with the A-Trust qualified signature test service
 
         MessageDigest hashAlgo = MessageDigest.getInstance("SHA-256");
@@ -113,7 +123,6 @@ public class PdfSignDemo {
         sig.update(hashToSign);
         byte[] HashSignature = sig.sign();
 
-
         String request = "{\"AuthSerial\": \"" + serial + "\", \"Hash\": \"";
         request += new String(Base64.getEncoder().encode(hashToSign));
         request +="\", \"HashSignature\": \"";
@@ -124,51 +133,73 @@ public class PdfSignDemo {
         String result = Post(postUrl,request);
         System.out.println("result: " + result);
 
-        // START PART 2 - The returned signature is now integrated in the prepared PDF structure and written to file
+        // START PART 2 - The returned signature is now integrated in the prepared PDF structure and written to file.
+        //                PAdESSignatureParameters and DDSDocument from before are reused now.
+
+        // we use Jackson to parse the returned JSON
         Map resultMap = new ObjectMapper().readValue(result.getBytes(StandardCharsets.UTF_8), Map.class);
 
+        // decode base64 encoded ECDSA signature
         byte[] jwsSignature = Base64.getDecoder().decode((String) resultMap.get("Signature"));
+
+        // convert R+S valued ECDSA signature to DER encoded signature. For PDF it would be perfect
+        // to get RSA encrypted, DER encoded signatures as a Base64 encoded string
+        // TODO: Get the signature already DER encoded (minor)
         byte[] derSignature = convertJWSConcatenatedToDEREncodedSignature(jwsSignature);
 
+        // fill the DSS structure with the signature and its algorithm
         SignatureValue signatureValue = new SignatureValue(SignatureAlgorithm.ECDSA_SHA256, derSignature);
 
-        // We invoke the PadesService to sign the document with the signature value obtained in
-        // the previous step.
+        // we invoke the PadesService to sign the document with the signature value obtained in
+        // the previous step from A-Trust.
         DSSDocument signedDocument = service.signDocument(doc, parameters, signatureValue);
 
+        // write the document to file for further testing
         signedDocument.writeTo(new FileOutputStream("output.pdf"));
     }
 
     private static PAdESSignatureParameters prepareSignParameters(X509Certificate cert) throws Exception {
-        // Preparing parameters for the PAdES signature
+        // preparing parameters for the PAdES signature
         PAdESSignatureParameters parameters = new PAdESSignatureParameters();
-        // We choose the level of the signature (-B, -T, -LT, -LTA).
+
+        // we choose the level of the signature (-B, -T, -LT, -LTA).
+        // while for Amtssignatur the basic level is enough since it doesn't require signed timestamps
         parameters.setSignatureLevel(SignatureLevel.PAdES_BASELINE_B);
 
+        // add Amtssignatur related information, which gets added to the DSS structure
+        // TODO: Verify compliance with Amtssignatur in terms of PDF signature metadata (major)
         parameters.setReason("Signature verification at: http://www.signature-verification.gv.at");
         parameters.setContactInfo("Amtssignatur contact info");
 
-        // get certificates holder name
+        // extract CN from certificates holder subject and use it as signer name
+        // copied from https://stackoverflow.com/questions/2914521/how-to-extract-cn-from-x509certificate-in-java/5527171#5527171
         X500Name x500name = new JcaX509CertificateHolder(cert).getSubject();
         RDN cn = x500name.getRDNs(BCStyle.CN)[0];
         parameters.setSignerName(IETFUtils.valueToString(cn.getFirst().getValue()));
 
+        // create a DSS compatible token
         CertificateToken certToken = new CertificateToken(cert);
 
-        // We set the signing certificate
+        // set the signing certificate
         parameters.setSigningCertificate(certToken);
 
-        // We set the certificate chain
+        // set the certificate chain, we just have a single one here, but we would add the whole trust chain
+        // when in production
+        // TODO: Add whole certificate chain (major)
         parameters.setCertificateChain(List.of(certToken));
 
-        // Initialize visual signature and configure
+        // TODO: Implement a visual signature as of Amtssignatur layout spec (major)
+
+        // initialize visual sample signature and configure
         SignatureImageParameters imageParameters = new SignatureImageParameters();
-        // set an image
+
+        // set a sample image
         imageParameters.setImage(new InMemoryDocument(new FileInputStream("signature-pen.png")));
 
         // initialize signature field parameters
         SignatureFieldParameters fieldParameters = new SignatureFieldParameters();
         imageParameters.setFieldParameters(fieldParameters);
+
         // the origin is the left and top corner of the page
         fieldParameters.setOriginX(20);
         fieldParameters.setOriginY(40);
