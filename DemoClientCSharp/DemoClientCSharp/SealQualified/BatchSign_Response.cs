@@ -2,11 +2,12 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace DemoClientCSharp.SealQualified
 {
-    class SignatureResponse
+    public sealed class BatchSign_Response
     {
-        public string Signature; 
+        public SignatureData[] ListOfSignature { get; set; }
     }
 }

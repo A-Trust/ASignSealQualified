@@ -1,31 +1,27 @@
-﻿using Org.BouncyCastle.Asn1;
+using DemoClientCSharp.SealQualified;
+using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Security;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.IO;
-using System.Linq;
-using System.Net;
+using System.Drawing.Drawing2D;
+using System.Security.Policy;
 using System.Text;
-using System.Windows.Forms;
+using System.Text.Json;
 
 namespace DemoClientCSharp
 {
     public partial class MainForm : Form
     {
         private static Random random = new Random();
-        private byte[] seal_cert; 
+        private byte[] seal_cert;
+
 
         public MainForm()
         {
             InitializeComponent();
-            seal_cert = null; 
-            show_seal_cert.Enabled = false; 
+            seal_cert = null;
+            show_seal_cert.Enabled = false;
         }
 
         private void button_load_auth_cert_Click(object sender, EventArgs e)
@@ -45,19 +41,11 @@ namespace DemoClientCSharp
             }
         }
 
-        private void MainForm_Load(object sender, EventArgs e)
+        private void WriteText(string msg)
         {
-            targetsystem.Items.Clear();
-            targetsystem.Items.Add(new MyListItem("test system", "https://hs-abnahme.a-trust.at/SealQualified/v1"));
-            targetsystem.Items.Add(new MyListItem("live system", "https://www.a-trust.at/SealQualified/v1"));
-            targetsystem.SelectedIndex = 0; 
+            textBoxResult.AppendText(msg + "\r\n");
         }
 
-        public static string RandomString()
-        {            
-            const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            return new string(Enumerable.Repeat(chars, 32).Select(s => s[random.Next(s.Length)]).ToArray());
-        }
 
         private SealQualified.Client InitClient()
         {
@@ -69,8 +57,9 @@ namespace DemoClientCSharp
                 WriteText("wrong password for authentication certificate?");
                 return null;
             }
-            return c; 
+            return c;
         }
+
 
         private void buttonGetCertificate_Click(object sender, EventArgs e)
         {
@@ -89,9 +78,35 @@ namespace DemoClientCSharp
             else
             {
                 WriteText("Certificate: " + Convert.ToBase64String(cert));
-                seal_cert = cert; 
+                seal_cert = cert;
                 show_seal_cert.Enabled = true;
             }
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            targetsystem.Items.Clear();
+            targetsystem.Items.Add(new MyListItem("test system", "https://hs-abnahme.a-trust.at/SealQualified/v1"));
+            targetsystem.Items.Add(new MyListItem("live system", "https://www.a-trust.at/SealQualified/v1"));
+            targetsystem.SelectedIndex = 0;
+        }
+
+        public static string RandomString()
+        {
+            const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            return new string(Enumerable.Repeat(chars, 32).Select(s => s[random.Next(s.Length)]).ToArray());
+        }
+
+        private void show_seal_cert_Click(object sender, EventArgs e)
+        {
+            if (null == seal_cert)
+            {
+                show_seal_cert.Enabled = false;
+                return;
+            }
+
+            var c = new System.Security.Cryptography.X509Certificates.X509Certificate2(seal_cert);
+            System.Security.Cryptography.X509Certificates.X509Certificate2UI.DisplayCertificate(c);
         }
 
         private void buttonSignTest_Click(object sender, EventArgs e)
@@ -121,14 +136,16 @@ namespace DemoClientCSharp
 
             if (null != seal_cert)
             {
-                VerifySignature(DataToSign, signature);
+                var result = VerifySignature(DataToSign, signature);
+                WriteText("signature verification = " + result.ToString());
             }
         }
 
-        private void VerifySignature(byte[] DataToSign, byte[] signature)
+
+
+        private bool VerifySignature(byte[] DataToSign, byte[] signature)
         {
             // verify signature
-            WriteText("start verify signature");
 
             // get public key from seal certificate
             var p = new Org.BouncyCastle.X509.X509CertificateParser();
@@ -149,24 +166,92 @@ namespace DemoClientCSharp
             signer.Init(false, x509.GetPublicKey());
             signer.BlockUpdate(DataToSign, 0, DataToSign.Length);
             bool result = signer.VerifySignature(signatureAsSequence);
-            WriteText("signature verification = " + result.ToString());
+            return result;
         }
 
-        private void WriteText(string msg)
+        private void buttonBatchSign_Click(object sender, EventArgs e)
         {
-            textBoxResult.AppendText(msg + "\r\n");
-        }
+            const int numHashes = 20; // max 200
 
-        private void show_seal_cert_Click(object sender, EventArgs e)
-        {
-            if(null == seal_cert)
+            HashData[] list = new HashData[numHashes];
+
+            for (int i = 0; i < numHashes; i++)
             {
-                show_seal_cert.Enabled = false;
-                return; 
+                byte[] DataToSign = Encoding.UTF8.GetBytes(RandomString());
+                var hashAlgo1 = new Sha256Digest();
+                hashAlgo1.BlockUpdate(DataToSign, 0, DataToSign.Length);
+                byte[] hashToSign1 = new byte[hashAlgo1.GetDigestSize()];
+                hashAlgo1.DoFinal(hashToSign1, 0);
+
+                list[i] = new HashData()
+                {
+                    Id = i,
+                    Hash = Convert.ToBase64String(hashToSign1)
+                };
             }
 
-            var c = new System.Security.Cryptography.X509Certificates.X509Certificate2(seal_cert);
-            System.Security.Cryptography.X509Certificates.X509Certificate2UI.DisplayCertificate(c);
+
+            var c = InitClient();
+            if (null == c)
+                return;
+
+
+            var signature = c.SignBatch(list);
+
+            if (null == signature)
+            {
+                WriteText("seal batch sign failed");
+            }
+            else
+            {
+                JsonSerializerOptions options = new JsonSerializerOptions();
+                options.WriteIndented = true;
+
+                WriteText("batch signature: " + JsonSerializer.Serialize<SignatureData[]>(signature,options));
+
+                if (null != seal_cert)
+                {
+                    for (int i = 0; i < signature.Length; i++)
+                    {
+                        var x = signature[i];
+
+                        bool verify = VerifySignatureBatch(list[i].Hash, x.Signature);
+                        WriteText($"sign OK: sig({x.Id})={x.Signature}; verify={verify}");
+                    }
+                }
+            }
         }
+
+
+        private bool VerifySignatureBatch(string hash, string sig)
+        {
+            var hashData = Convert.FromBase64String(hash);
+            var signature = Convert.FromBase64String(sig);
+
+            // verify signature
+
+            // get public key from seal certificate
+            var p = new Org.BouncyCastle.X509.X509CertificateParser();
+            var x509 = p.ReadCertificate(seal_cert);
+
+            // return value of signature is juse r and s buffers appended
+            // for bouncycastle VerifySignature to work we need an ASN1 Sequence
+            int len = signature.Length / 2;
+            BigInteger sssrVal = new BigInteger(signature, 0, len);
+            BigInteger rVal = new BigInteger(1, signature, 0, len);
+            BigInteger sssVal = new BigInteger(signature, len, len);
+            BigInteger sVal = new BigInteger(1, signature, len, len);
+            DerSequence seq = new DerSequence(new DerInteger(rVal), new DerInteger(sVal));
+            var signatureAsSequence = seq.GetDerEncoded();
+
+            // actual verify
+            ISigner signer = SignerUtilities.GetSigner("NONEwithECDSA");
+            signer.Init(false, x509.GetPublicKey());
+            signer.BlockUpdate(hashData, 0, hashData.Length);
+            bool result = signer.VerifySignature(signatureAsSequence);
+            return result;
+        }
+
+
     }
 }

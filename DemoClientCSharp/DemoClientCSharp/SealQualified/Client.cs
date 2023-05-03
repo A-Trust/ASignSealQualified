@@ -1,17 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Web;
-using System.Linq;
-using System.Text;
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Digests;
+﻿using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using System.Net;
-using Newtonsoft.Json;
+using System.Text;
+using System.Text.Json;
+using System.Web;
 
 namespace DemoClientCSharp.SealQualified
 {
@@ -19,14 +14,14 @@ namespace DemoClientCSharp.SealQualified
     {
         private AsymmetricKeyParameter AuthenticationCertificatePrivateKey;
         private X509Certificate AuthenticationCertificateCertificate;
-        private string baseurl; 
+        private string baseurl;
 
         public Client(string targetsystem)
         {
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11;
-            baseurl = targetsystem.TrimEnd('/'); 
-            AuthenticationCertificatePrivateKey = null; 
-            AuthenticationCertificateCertificate = null; 
+            baseurl = targetsystem.TrimEnd('/');
+            AuthenticationCertificatePrivateKey = null;
+            AuthenticationCertificateCertificate = null;
         }
 
 
@@ -35,33 +30,34 @@ namespace DemoClientCSharp.SealQualified
             AuthenticationCertificatePrivateKey = null;
             AuthenticationCertificateCertificate = null;
 
-
             try
             {
-                FileStream Cert = new FileStream(authentication_certificate_path, FileMode.Open, FileAccess.Read);
-                var p12 = new Pkcs12Store();
-                p12.Load(Cert, authentication_certificate_password.ToCharArray());
-
-                foreach (string alias in p12.Aliases)
+                using (var cert = new FileStream(authentication_certificate_path, FileMode.Open, FileAccess.Read))
                 {
-                    if (p12.IsKeyEntry(alias))
+                    var p12 = new Pkcs12StoreBuilder().Build();
+                    p12.Load(cert, authentication_certificate_password.ToCharArray());
+
+                    foreach (string alias in p12.Aliases)
                     {
-                        AuthenticationCertificatePrivateKey = p12.GetKey(alias).Key;
-                        break;
+                        if (p12.IsKeyEntry(alias))
+                        {
+                            AuthenticationCertificatePrivateKey = p12.GetKey(alias).Key;
+                            break;
+                        }
                     }
-                }
 
-                foreach (string alias in p12.Aliases)
-                {
-                    X509CertificateEntry entry = p12.GetCertificate(alias);
-                    if (VerifyPivateAndPublicKey(entry.Certificate.GetPublicKey(), AuthenticationCertificatePrivateKey))
+                    foreach (string alias in p12.Aliases)
                     {
-                        AuthenticationCertificateCertificate = p12.GetCertificate(alias).Certificate;
+                        X509CertificateEntry entry = p12.GetCertificate(alias);
+                        if (VerifyPivateAndPublicKey(entry.Certificate.GetPublicKey(), AuthenticationCertificatePrivateKey))
+                        {
+                            AuthenticationCertificateCertificate = p12.GetCertificate(alias).Certificate;
+                        }
                     }
                 }
             }
-            catch (Exception ex)
-            {                
+            catch (Exception)
+            {
                 return false;
             }
             return true;
@@ -100,10 +96,10 @@ namespace DemoClientCSharp.SealQualified
         public byte[] GetSealCertificate(string sid = null)
         {
             if (null == sid)
-                sid = "dummy"; 
+                sid = "dummy";
 
             if (null == AuthenticationCertificateCertificate)
-                return null; 
+                return null;
 
             string serial = AuthenticationCertificateCertificate.SerialNumber.ToString(10);
             string url = $"{baseurl}/Certificate/{HttpUtility.UrlEncode(serial)}/{HttpUtility.UrlEncode(sid)}";
@@ -111,9 +107,9 @@ namespace DemoClientCSharp.SealQualified
             byte[] cert = null;
             if (Get(url, out cert))
             {
-                return cert; 
+                return cert;
             }
-            return null; 
+            return null;
         }
 
 
@@ -128,7 +124,7 @@ namespace DemoClientCSharp.SealQualified
             if (null == AuthenticationCertificatePrivateKey)
                 return null;
 
-            const string HashSignatureMechanism = "SHA256withRSA"; 
+            const string HashSignatureMechanism = "SHA256withRSA";
 
             // prepare Request
             ISigner signer = SignerUtilities.GetSigner(HashSignatureMechanism);
@@ -136,12 +132,12 @@ namespace DemoClientCSharp.SealQualified
             signer.BlockUpdate(hashToSign, 0, hashToSign.Length);
             var HashSignature = signer.GenerateSignature();
 
-            var o = new SignatureRequest();
-            o.AuthSerial = AuthenticationCertificateCertificate.SerialNumber.ToString(10); 
+            var o = new Signature_Request();
+            o.AuthSerial = AuthenticationCertificateCertificate.SerialNumber.ToString(10);
             o.Hash = Convert.ToBase64String(hashToSign);
             o.HashSignature = Convert.ToBase64String(HashSignature);
             o.HashSignatureMechanism = HashSignatureMechanism;
-            var reqStr = JsonConvert.SerializeObject(o); 
+            var reqStr = JsonSerializer.Serialize(o);
 
             string url = $"{baseurl}/Sign/{HttpUtility.UrlEncode(sid)}";
 
@@ -150,13 +146,62 @@ namespace DemoClientCSharp.SealQualified
                 return null;
             }
 
-            var respObj = JsonConvert.DeserializeObject<SignatureResponse>(ResponseData);
-            if(null != respObj)
+            var respObj = JsonSerializer.Deserialize<Signature_Response>(ResponseData);
+            if (null != respObj)
             {
-                return Convert.FromBase64String(respObj.Signature); 
+                return Convert.FromBase64String(respObj.Signature);
             }
 
-            return null; 
+            return null;
+        }
+
+
+
+        public SignatureData[] SignBatch(HashData[] list, string sid = null)
+        {
+            if (null == sid)
+                sid = "dummy";
+
+            if (null == AuthenticationCertificateCertificate)
+                return null;
+
+            if (null == AuthenticationCertificatePrivateKey)
+                return null;
+
+            var data = JsonSerializer.Serialize(list.ToArray());
+            var data2Sign = Encoding.UTF8.GetBytes(data);
+
+
+            const string HashSignatureMechanism = "SHA256withRSA";
+
+            // prepare Request
+            ISigner signer = SignerUtilities.GetSigner(HashSignatureMechanism);
+            signer.Init(true, AuthenticationCertificatePrivateKey);
+            signer.BlockUpdate(data2Sign, 0, data2Sign.Length);
+            var HashSignature = signer.GenerateSignature();
+
+            var o = new BatchSign_Request();
+            o.AuthSerial = AuthenticationCertificateCertificate.SerialNumber.ToString(10);
+            o.ListOfHashes = Convert.ToBase64String(data2Sign);
+            o.HashSignature = Convert.ToBase64String(HashSignature);
+            o.HashSignatureMechanism = HashSignatureMechanism;
+
+            var url = $"{baseurl}/Batch/Sign/{HttpUtility.UrlEncode(sid)}";
+            string ResponseData = "";
+            if (!PostJson(url, JsonSerializer.Serialize(o), out ResponseData))
+            {
+                return null;
+            }
+
+            var respObj = JsonSerializer.Deserialize<BatchSign_Response>(ResponseData);
+            var sig = respObj.ListOfSignature;
+
+            if (null == sig || sig.Length <= 0)
+            {
+                return null;
+            }
+
+            return sig;
         }
 
 
@@ -179,10 +224,13 @@ namespace DemoClientCSharp.SealQualified
                 if (WebExceptionStatus.ProtocolError == wex.Status)
                 {
                     HttpWebResponse webResponse = (HttpWebResponse)wex.Response;
-                    StreamReader reader = new StreamReader(webResponse.GetResponseStream(), System.Text.Encoding.UTF8);
-                    var ResponseData = reader.ReadToEnd();
+                    string ResponseData = ""; 
+                    using (var reader = new StreamReader(webResponse.GetResponseStream(), System.Text.Encoding.UTF8))
+                    {
+                        ResponseData = reader.ReadToEnd();
+                    }
                     if (!string.IsNullOrEmpty(ResponseData))
-                    {      
+                    {
                         //TODO: error text
                     }
                     return false;
@@ -217,16 +265,21 @@ namespace DemoClientCSharp.SealQualified
                 webRequest.GetRequestStream().Write(rawContent, 0, rawContent.Length);
                 HttpWebResponse webResponse = (HttpWebResponse)webRequest.GetResponse();
 
-                StreamReader reader = new StreamReader(webResponse.GetResponseStream(), System.Text.Encoding.UTF8);
-                ResponseData = reader.ReadToEnd();
+                using (var reader = new StreamReader(webResponse.GetResponseStream(), System.Text.Encoding.UTF8))
+                {
+                    ResponseData = reader.ReadToEnd();
+                }
             }
             catch (WebException wex)
             {
                 if (WebExceptionStatus.ProtocolError == wex.Status)
                 {
                     HttpWebResponse webResponse = (HttpWebResponse)wex.Response;
-                    StreamReader reader = new StreamReader(webResponse.GetResponseStream(), System.Text.Encoding.UTF8);
-                    ResponseData = reader.ReadToEnd();
+                    using (var reader = new StreamReader(webResponse.GetResponseStream(), System.Text.Encoding.UTF8))
+                    {
+                        ResponseData = reader.ReadToEnd();
+                    }
+
                     if (!string.IsNullOrEmpty(ResponseData))
                     {
                         //TODO: error text
@@ -238,7 +291,7 @@ namespace DemoClientCSharp.SealQualified
                     return false;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return false;
             }
