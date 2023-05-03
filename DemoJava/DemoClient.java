@@ -36,8 +36,7 @@ public class DemoClient
 	public static void main(String[] args) throws Exception{		
 		char[] pfxPassword = "testpwd".toCharArray();
 		String pfxFile = "./../test_credentials/authentication_certificate.p12";			
-		String baseurl = "http://hs-abnahme.a-trust.at/SealQualified/v1/";  // test system (HTTP)
-		//String baseurl = "https://hs-abnahme.a-trust.at/SealQualified/v1/";  // test system (HTTPS)
+		String baseurl = "https://hs-abnahme.a-trust.at/SealQualified/v1/";  // test system (HTTPS)
 		//String baseurl = "https://www.a-trust.at/SealQualified/v1/";  // live system (only HTTPS)
 				
 		// load pkcs12
@@ -59,44 +58,65 @@ public class DemoClient
 		X509Certificate cert = (X509Certificate) keystore.getCertificate(keyAlias);		
 		String serial = cert.getSerialNumber().toString();
 
-		// get seal certificate
+
+
 		System.out.println("================="); 
 		System.out.println("get seal certificate"); 
-		String getUrl = baseurl + "/Certificate/" + serial + "/nosessionid";
-		byte[] seal_certificate_raw = Get(getUrl); 
-		
-		String seal_certificate_base64 = new String(Base64.getEncoder().encode(seal_certificate_raw));
-		System.out.println("seal certificate: " + seal_certificate_base64); 
-
-
-		System.out.println("================="); 
+		GetSealCertificate(baseurl, serial);
+		System.out.println("================="); 		
 		System.out.println("sign with seal private key"); 
-
-
-		// Hash to Sign
-		byte[] dataToSign = "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.".getBytes();
-		
-		MessageDigest hashAlgo = MessageDigest.getInstance("SHA-256");
-		byte[] hashToSign = hashAlgo.digest(dataToSign);
-		
-
-		// prepare Request
-		Signature sig = Signature.getInstance("SHA256WithRSA");
-        sig.initSign(key);
-		sig.update(hashToSign);
-        byte[] HashSignature = sig.sign();
-		
-		
-		String request = "{\"AuthSerial\": \"" + serial + "\", \"Hash\": \"";
-		request += new String(Base64.getEncoder().encode(hashToSign));
-		request +="\", \"HashSignature\": \"";
-		request += new String(Base64.getEncoder().encode(HashSignature));
-		request +="\", \"HashSignatureMechanism\": \"SHA256withRSA\" }";
-		
-		String postUrl = baseurl + "/Sign/nosessionid";
-		String result = Post(postUrl,request);
-		System.out.println("result: " + result); 			
+		Sign(baseurl, key, serial);
 	}
+	
+	
+	private static void Sign(String baseurl, PrivateKey key, String serial)
+	{
+		try {
+			// Hash to Sign
+			byte[] dataToSign = "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum.".getBytes();
+			
+			MessageDigest hashAlgo = MessageDigest.getInstance("SHA-256");
+			byte[] hashToSign = hashAlgo.digest(dataToSign);
+			
+
+			// prepare Request
+			Signature sig = Signature.getInstance("SHA256WithRSA");
+			sig.initSign(key);
+			sig.update(hashToSign);
+			byte[] HashSignature = sig.sign();
+			
+			
+			String request = "{\"AuthSerial\": \"" + serial + "\", \"Hash\": \"";
+			request += new String(Base64.getEncoder().encode(hashToSign));
+			request +="\", \"HashSignature\": \"";
+			request += new String(Base64.getEncoder().encode(HashSignature));
+			request +="\", \"HashSignatureMechanism\": \"SHA256withRSA\" }";
+			
+			String postUrl = baseurl + "/Sign/nosessionid";
+			String result = Post(postUrl,request);
+			System.out.println("result: " + result); 	
+		}
+		catch(Exception e) {
+			System.out.println("exception: " + e.toString()); 
+		}	
+	}
+	
+	private static void GetSealCertificate(String baseurl, String serial)
+	{
+		try {		
+			// get seal certificate		
+			String getUrl = baseurl + "/Certificate/" + serial + "/nosessionid";
+			byte[] seal_certificate_raw = Get(getUrl); 
+			
+			String seal_certificate_base64 = new String(Base64.getEncoder().encode(seal_certificate_raw));
+			System.out.println("seal certificate: " + seal_certificate_base64); 
+		}
+		catch(Exception e) {
+			System.out.println("exception: " + e.toString()); 
+		}				
+	}
+	
+	
 	
 	private static String Post(String postUrl, String requestJson) throws Exception
 	{
