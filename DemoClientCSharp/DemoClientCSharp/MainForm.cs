@@ -86,7 +86,7 @@ namespace DemoClientCSharp
         private void Form1_Load(object sender, EventArgs e)
         {
             targetsystem.Items.Clear();
-            targetsystem.Items.Add(new MyListItem("test system", "https://hs-abnahme.a-trust.at/SealQualified/v1"));
+            targetsystem.Items.Add(new MyListItem("test system", "https://test.seal.a-trust.at/SealQualified/v1"));
             targetsystem.Items.Add(new MyListItem("live system", "https://www.a-trust.at/SealQualified/v1"));
             targetsystem.SelectedIndex = 0;
         }
