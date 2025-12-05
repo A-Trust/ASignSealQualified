@@ -38,7 +38,7 @@ public class DemoClient
 		char[] pfxPassword = "testpwd".toCharArray();
 		String pfxFile = "./../test_credentials/authentication_certificate.p12";			
 		String baseurl = "https://test.seal.a-trust.at/SealQualified/v1/";  // test system (HTTPS)
-		//String baseurl = "https://www.a-trust.at/SealQualified/v1/";  // live system (only HTTPS)
+		//String baseurl = "https://seal.a-trust.at/SealQualified/v1/";  // live system (only HTTPS)
 				
 		// load pkcs12
 		Security.setProperty("crypto.policy", "unlimited");		
