@@ -5,4 +5,5 @@
 **a.sign seal qualified** is a remote signature, therefore the seal private key is stored in a hardware security module in the A-Trust data center.
 
 Developer Manual: https://docs.a-trust.at/apis/SealQualified
+
 Swagger: https://docs.a-trust.at/swagger/?urls.primaryName=a.sign%20Seal%20Qualified
